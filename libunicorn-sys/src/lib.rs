@@ -1,12 +1,11 @@
-extern crate libc;
-#[macro_use]
-extern crate bitflags;
-
+#![feature(rust_2018_preview, use_extern_macros)]
+#![warn(elided_lifetimes_in_paths)]
 pub mod unicorn_const;
 
 use std::ffi::CStr;
 use std::os::raw::c_char;
-use unicorn_const::{Arch, MemRegion, Mode, Error, HookType, Query};
+
+use crate::unicorn_const::{Arch, MemRegion, Mode, Error, HookType, Query};
 
 #[allow(non_camel_case_types)]
 pub type uc_handle = libc::size_t;

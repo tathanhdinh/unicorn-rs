@@ -39,6 +39,7 @@ mod macros;
 use std::{
     mem,
     collections::HashMap,
+    marker::PhantomData,
 };
 
 pub use crate::{
@@ -84,12 +85,12 @@ implement_register!(RegisterMIPS);
 implement_register!(RegisterSPARC);
 implement_register!(RegisterX86);
 
-pub trait Cpu {
+pub trait Cpu<'a> {
     type Reg: Register;
 
-    fn emu(&self) -> &Unicorn;
+    fn emu(&self) -> &Unicorn<'a>;
 
-    fn mut_emu(&mut self) -> &mut Unicorn;
+    fn mut_emu(&mut self) -> &mut Unicorn<'a>;
 
     /// Read an unsigned value from a register.
     fn reg_read(&self, reg: Self::Reg) -> Result<u64> {
@@ -317,8 +318,9 @@ implement_emulator!(doc="An X86 emulator instance.",
                     CpuX86, Arch::X86, RegisterX86);
 
 /// Struct to bind a unicorn instance to a callback.
-pub struct UnicornHook<F> {
-    unicorn: *const Unicorn,
+pub struct UnicornHook<'a, F> {
+    // unicorn: *const Unicorn,
+    unicorn: &'a Unicorn<'a>,
     callback: F,
 }
 
@@ -370,22 +372,24 @@ extern "C" fn insn_sys_hook_proxy(_: uc_handle, user_data: *mut InsnSysHook) {
     callback(unicorn)
 }
 
-type CodeHook = UnicornHook<Box<FnMut(&Unicorn, u64, u32)>>;
-type IntrHook = UnicornHook<Box<FnMut(&Unicorn, u32)>>;
-type MemHook = UnicornHook<Box<FnMut(&Unicorn, MemType, u64, usize, i64) -> bool>>;
-type InsnInHook = UnicornHook<Box<FnMut(&Unicorn, u32, usize) -> u32>>;
-type InsnOutHook = UnicornHook<Box<FnMut(&Unicorn, u32, usize, u32)>>;
-type InsnSysHook = UnicornHook<Box<FnMut(&Unicorn)>>;
+type CodeHook<'a> = UnicornHook<'a, Box<FnMut(&Unicorn<'a>, u64, u32)>>;
+type IntrHook<'a> = UnicornHook<'a, Box<FnMut(&Unicorn<'a>, u32)>>;
+type MemHook<'a> = UnicornHook<'a, Box<FnMut(&Unicorn<'a>, MemType, u64, usize, i64) -> bool>>;
+type InsnInHook<'a> = UnicornHook<'a, Box<FnMut(&Unicorn<'a>, u32, usize) -> u32>>;
+type InsnOutHook<'a> = UnicornHook<'a, Box<FnMut(&Unicorn<'a>, u32, usize, u32)>>;
+type InsnSysHook<'a> = UnicornHook<'a, Box<FnMut(&Unicorn<'a>)>>;
 
 /// Internal : A Unicorn emulator instance, use one of the Cpu structs instead.
-pub struct Unicorn {
+pub struct Unicorn<'a> {
     handle: libc::size_t, // Opaque handle to uc_engine
-    code_callbacks: HashMap<uc_hook, Box<CodeHook>>,
-    intr_callbacks: HashMap<uc_hook, Box<IntrHook>>,
-    mem_callbacks: HashMap<uc_hook, Box<MemHook>>,
-    insn_in_callbacks: HashMap<uc_hook, Box<InsnInHook>>,
-    insn_out_callbacks: HashMap<uc_hook, Box<InsnOutHook>>,
-    insn_sys_callbacks: HashMap<uc_hook, Box<InsnSysHook>>,
+    code_callbacks: HashMap<uc_hook, Box<CodeHook<'a>>>,
+    intr_callbacks: HashMap<uc_hook, Box<IntrHook<'a>>>,
+    mem_callbacks: HashMap<uc_hook, Box<MemHook<'a>>>,
+    insn_in_callbacks: HashMap<uc_hook, Box<InsnInHook<'a>>>,
+    insn_out_callbacks: HashMap<uc_hook, Box<InsnOutHook<'a>>>,
+    insn_sys_callbacks: HashMap<uc_hook, Box<InsnSysHook<'a>>>,
+
+    _p: PhantomData<&'a ()>,
 }
 
 /// Returns a tuple `(major, minor)` for the bindings version number.
@@ -410,10 +414,11 @@ pub fn arch_supported(arch: Arch) -> bool {
     unsafe { uc_arch_supported(arch) }
 }
 
-impl Unicorn {
+impl<'a> Unicorn<'a> {
     /// Create a new instance of the unicorn engine for the specified architecture
     /// and hardware mode.
-    pub fn new(arch: Arch, mode: Mode) -> Result<Box<Unicorn>> {
+    // pub fn new(arch: Arch, mode: Mode) -> Result<Box<Unicorn>> {
+    pub fn new(arch: Arch, mode: Mode) -> Result<Unicorn<'a>> {
         // Verify bindings compatibility with the core before going further.
         let (major, minor) = unicorn_version();
         if major != BINDINGS_MAJOR || minor != BINDINGS_MINOR {
@@ -423,7 +428,7 @@ impl Unicorn {
         let mut handle: libc::size_t = Default::default();
         let err = unsafe { uc_open(arch, mode, &mut handle) };
         if err == Error::OK {
-            Ok(Box::new(Unicorn {
+            Ok(Unicorn {
                 handle,
                 code_callbacks: Default::default(),
                 intr_callbacks: Default::default(),
@@ -431,7 +436,9 @@ impl Unicorn {
                 insn_in_callbacks: Default::default(),
                 insn_out_callbacks: Default::default(),
                 insn_sys_callbacks: Default::default(),
-            }))
+
+                _p: PhantomData,
+            })
         } else {
             Err(err)
         }
@@ -684,13 +691,14 @@ impl Unicorn {
         callback: F,
     ) -> Result<uc_hook>
     where
-        F: Fn(&Unicorn, u64, u32) + 'static,
+        F: Fn(&Unicorn<'a>, u64, u32) + 'static,
     {
         let mut hook: uc_hook = 0;
         let p_hook: *mut libc::size_t = &mut hook;
 
         let user_data = Box::new(CodeHook {
-            unicorn: self as *mut _,
+            // unicorn: self as *mut _,
+            unicorn: self,
             callback: Box::new(callback),
         });
         let p_user_data: *mut libc::size_t = unsafe { mem::transmute(&*user_data) };
@@ -724,7 +732,8 @@ impl Unicorn {
         let p_hook: *mut libc::size_t = &mut hook;
 
         let user_data = Box::new(IntrHook {
-            unicorn: self as *mut _,
+            // unicorn: self as *mut _,
+            unicorn: self,
             callback: Box::new(callback),
         });
         let p_user_data: *mut libc::size_t = unsafe { mem::transmute(&*user_data) };
@@ -982,7 +991,7 @@ impl Unicorn {
     }
 }
 
-impl Drop for Unicorn {
+impl<'a> Drop for Unicorn<'a> {
     fn drop(&mut self) {
         unsafe { uc_close(self.handle) };
     }

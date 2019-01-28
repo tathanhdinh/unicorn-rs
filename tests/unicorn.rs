@@ -169,7 +169,7 @@ fn emulate_x86() {
     assert_eq!(emu.mem_map(0x1000, 0x4000, unicorn::Protection::ALL), Ok(()));
     assert_eq!(emu.mem_write(0x1000, &x86_code32), Ok(()));
     assert_eq!(
-        emu.mem_read(0x1000, x86_code32.len()),
+        emu.mem_read(0x1000, x86_code32.len()).map(|s| s.into_vec()),
         Ok(x86_code32.clone())
     );
 
@@ -481,7 +481,7 @@ fn emulate_arm() {
     assert_eq!(emu.mem_map(0x1000, 0x4000, unicorn::PROT_ALL), Ok(()));
     assert_eq!(emu.mem_write(0x1000, &arm_code32), Ok(()));
     assert_eq!(
-        emu.mem_read(0x1000, arm_code32.len()),
+        emu.mem_read(0x1000, arm_code32.len()).map(|s| s.into_vec()),
         Ok(arm_code32.clone())
     );
 
@@ -511,7 +511,7 @@ fn emulate_mips() {
     assert_eq!(emu.mem_map(0x1000, 0x4000, unicorn::Protection::ALL), Ok(()));
     assert_eq!(emu.mem_write(0x1000, &mips_code32), Ok(()));
     assert_eq!(
-        emu.mem_read(0x1000, mips_code32.len()),
+        emu.mem_read(0x1000, mips_code32.len()).map(|s| s.into_vec()),
         Ok(mips_code32.clone())
     );
     assert_eq!(emu.reg_write(unicorn::RegisterMIPS::AT, 0), Ok(()));
@@ -554,7 +554,7 @@ fn mem_map_ptr() {
     );
     assert_eq!(emu.mem_write(0x1000, &x86_code32), Ok(()));
     assert_eq!(
-        emu.mem_read(0x1000, x86_code32.len()),
+        emu.mem_read(0x1000, x86_code32.len()).map(|s| s.into_vec()),
         Ok(x86_code32.clone())
     );
 
@@ -590,7 +590,7 @@ fn mem_map_ptr() {
     );
     assert_eq!(emu.mem_write(0x1000, &x86_code32), Ok(()));
     assert_eq!(
-        emu.mem_read(0x1000, x86_code32.len()),
+        emu.mem_read(0x1000, x86_code32.len()).map(|s| s.into_vec()),
         Ok(x86_code32.clone())
     );
 
@@ -628,7 +628,7 @@ fn x86_context_save_and_restore () {
         /* now, save the context... */
         let context = emu.context_save();
         let context = context.unwrap();
-        
+
         /* and create a new emulator, into which we will "restore" that context */
         let emu2 = CpuX86::new(mode).expect("failed to instantiate emu2");
         assert_eq!(emu2.context_restore(&context), Ok(()));

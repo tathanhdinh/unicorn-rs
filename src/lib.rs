@@ -154,7 +154,7 @@ pub trait Cpu {
     }
 
     /// Read a range of bytes from memory at the specified address.
-    fn mem_read(&self, address: u64, size: usize) -> Result<(Vec<u8>)> {
+    fn mem_read(&self, address: u64, size: usize) -> Result<Box<[u8]>> {
         self.emu().mem_read(address, size)
     }
 
@@ -579,8 +579,8 @@ impl Unicorn {
     }
 
     /// Read a range of bytes from memory at the specified address.
-    pub fn mem_read(&self, address: u64, size: usize) -> Result<(Vec<u8>)> {
-        let mut bytes: Vec<u8> = Vec::with_capacity(size);
+    pub fn mem_read(&self, address: u64, size: usize) -> Result<Box<[u8]>> {
+        let mut bytes = vec![0; size].into_boxed_slice();
         let err = unsafe {
             uc_mem_read(
                 self.handle,
@@ -590,9 +590,6 @@ impl Unicorn {
             )
         };
         if err == Error::OK {
-            unsafe {
-                bytes.set_len(size);
-            }
             Ok(bytes)
         } else {
             Err(err)
@@ -910,14 +907,15 @@ impl Unicorn {
     ///
     /// `hook` is the value returned by either `add_code_hook` or `add_mem_hook`.
     pub fn remove_hook(&mut self, hook: uc_hook) -> Result<()> {
-        let err = unsafe { uc_hook_del(self.handle, hook) } as Error;
+        let err = unsafe { uc_hook_del(self.handle, hook) };
         // Check in all maps to find which one has the hook.
-        self.code_callbacks.remove(&hook);
-        self.intr_callbacks.remove(&hook);
-        self.mem_callbacks.remove(&hook);
-        self.insn_in_callbacks.remove(&hook);
-        self.insn_out_callbacks.remove(&hook);
-        self.insn_sys_callbacks.remove(&hook);
+        macro_rules! ignore { () => { |_| () } };
+        self.code_callbacks.remove(&hook).map(ignore!())
+            .or_else(|| self.intr_callbacks.remove(&hook).map(ignore!()))
+            .or_else(|| self.mem_callbacks.remove(&hook).map(ignore!()))
+            .or_else(|| self.insn_in_callbacks.remove(&hook).map(ignore!()))
+            .or_else(|| self.insn_out_callbacks.remove(&hook).map(ignore!()))
+            .or_else(|| self.insn_sys_callbacks.remove(&hook).map(ignore!()));
 
         if err == Error::OK {
             Ok(())

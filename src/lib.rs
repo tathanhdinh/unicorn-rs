@@ -204,7 +204,7 @@ pub trait Cpu<'a> {
         callback: F,
     ) -> Result<uc_hook>
     where
-        F: 'a + FnMut(&'a Unicorn<'a>, u64, u32) -> (),
+        F: 'a + FnMut(&Unicorn, u64, u32) -> (),
     {
         self.emu().add_code_hook(hook_type, begin, end, callback)
     }
@@ -226,7 +226,7 @@ pub trait Cpu<'a> {
         callback: F,
     ) -> Result<uc_hook>
     where
-        F: 'a + FnMut(&'a Unicorn<'a>, MemType, u64, usize, i64) -> bool,
+        F: 'a + FnMut(&Unicorn, MemType, u64, usize, i64) -> bool,
     {
         self.emu().add_mem_hook(hook_type, begin, end, callback)
     }
@@ -234,7 +234,7 @@ pub trait Cpu<'a> {
     /// Add an "in" instruction hook.
     fn add_insn_in_hook<F>(&self, callback: F) -> Result<uc_hook>
     where
-        F: 'a + FnMut(&'a Unicorn<'a>, u32, usize) -> u32,
+        F: 'a + FnMut(&Unicorn, u32, usize) -> u32,
     {
         self.emu().add_insn_in_hook(callback)
     }
@@ -242,7 +242,7 @@ pub trait Cpu<'a> {
     /// Add an "out" instruction hook.
     fn add_insn_out_hook<F>(&self, callback: F) -> Result<uc_hook>
     where
-        F: 'a + FnMut(&'a Unicorn<'a>, u32, usize, u32),
+        F: 'a + FnMut(&Unicorn, u32, usize, u32),
     {
         self.emu().add_insn_out_hook(callback)
     }
@@ -256,7 +256,7 @@ pub trait Cpu<'a> {
         callback: F,
     ) -> Result<uc_hook>
     where
-        F: 'a + FnMut(&'a Unicorn<'a>),
+        F: 'a + FnMut(&Unicorn),
     {
         self.emu()
             .add_insn_sys_hook(insn_type, begin, end, callback)
@@ -398,13 +398,12 @@ extern "C" fn insn_sys_hook_proxy(_: uc_handle, user_data: *mut InsnSysHook) {
     callback(unicorn)
 }
 
-type CodeHook<'a> = UnicornHook<'a, Box<'a + FnMut(&'a Unicorn<'a>, u64, u32)>>;
-type IntrHook<'a> = UnicornHook<'a, Box<'a + FnMut(&'a Unicorn<'a>, u32)>>;
-type MemHook<'a> =
-    UnicornHook<'a, Box<'a + FnMut(&'a Unicorn<'a>, MemType, u64, usize, i64) -> bool>>;
-type InsnInHook<'a> = UnicornHook<'a, Box<'a + FnMut(&'a Unicorn<'a>, u32, usize) -> u32>>;
-type InsnOutHook<'a> = UnicornHook<'a, Box<'a + FnMut(&'a Unicorn<'a>, u32, usize, u32)>>;
-type InsnSysHook<'a> = UnicornHook<'a, Box<'a + FnMut(&'a Unicorn<'a>)>>;
+type CodeHook<'a> = UnicornHook<'a, Box<'a + FnMut(&Unicorn, u64, u32)>>;
+type IntrHook<'a> = UnicornHook<'a, Box<'a + FnMut(&Unicorn, u32)>>;
+type MemHook<'a> = UnicornHook<'a, Box<'a + FnMut(&Unicorn, MemType, u64, usize, i64) -> bool>>;
+type InsnInHook<'a> = UnicornHook<'a, Box<'a + FnMut(&Unicorn, u32, usize) -> u32>>;
+type InsnOutHook<'a> = UnicornHook<'a, Box<'a + FnMut(&Unicorn, u32, usize, u32)>>;
+type InsnSysHook<'a> = UnicornHook<'a, Box<'a + FnMut(&Unicorn)>>;
 
 /// Internal : A Unicorn emulator instance, use one of the Cpu structs instead.
 pub struct Unicorn<'a> {
@@ -416,6 +415,17 @@ pub struct Unicorn<'a> {
     insn_out_callbacks: RefCell<HashMap<uc_hook, Box<InsnOutHook<'a>>>>,
     insn_sys_callbacks: RefCell<HashMap<uc_hook, Box<InsnSysHook<'a>>>>,
     phantom: PhantomData<&'a libc::size_t>,
+}
+
+pub struct UnicornHookNext<'b, 'a: 'b, F: 'b> {
+    unicorn: &'b Unicorn<'a>,
+    callback: F,
+}
+
+type CodeHookNext<'b, 'a: 'b> = UnicornHookNext<'b, 'a, Box<'b + FnMut(&Unicorn, u64, u32)>>;
+pub struct UnicornWrapper<'b, 'a: 'b> {
+    unicorn: Unicorn<'a>,
+    code_callbacks: RefCell<HashMap<uc_hook, Box<CodeHookNext<'b, 'a>>>>,
 }
 
 /// Returns a tuple `(major, minor)` for the bindings version number.
@@ -707,7 +717,7 @@ impl<'a> Unicorn<'a> {
         callback: F,
     ) -> Result<uc_hook>
     where
-        F: 'a + FnMut(&'a Unicorn<'a>, u64, u32),
+        F: 'a + FnMut(&Unicorn, u64, u32),
     {
         let mut hook: uc_hook = 0;
         let p_hook: *mut libc::size_t = &mut hook;
@@ -741,7 +751,7 @@ impl<'a> Unicorn<'a> {
     /// Add an interrupt hook.
     pub fn add_intr_hook<F>(&self, callback: F) -> Result<uc_hook>
     where
-        F: 'a + FnMut(&'a Unicorn<'a>, u32),
+        F: 'a + FnMut(&Unicorn, u32),
     {
         let mut hook: uc_hook = 0;
         let p_hook: *mut libc::size_t = &mut hook;
@@ -782,7 +792,7 @@ impl<'a> Unicorn<'a> {
         callback: F,
     ) -> Result<uc_hook>
     where
-        F: 'a + FnMut(&'a Unicorn<'a>, MemType, u64, usize, i64) -> bool,
+        F: 'a + FnMut(&Unicorn, MemType, u64, usize, i64) -> bool,
     {
         let mut hook: uc_hook = 0;
         let p_hook: *mut libc::size_t = &mut hook;
@@ -817,7 +827,7 @@ impl<'a> Unicorn<'a> {
     /// Add an "in" instruction hook.
     pub fn add_insn_in_hook<F>(&self, callback: F) -> Result<uc_hook>
     where
-        F: 'a + FnMut(&'a Unicorn<'a>, u32, usize) -> u32,
+        F: 'a + FnMut(&Unicorn, u32, usize) -> u32,
     {
         let mut hook: uc_hook = 0;
         let p_hook: *mut libc::size_t = &mut hook;
@@ -853,7 +863,7 @@ impl<'a> Unicorn<'a> {
     /// Add an "out" instruction hook.
     pub fn add_insn_out_hook<F>(&self, callback: F) -> Result<uc_hook>
     where
-        F: 'a + FnMut(&'a Unicorn<'a>, u32, usize, u32),
+        F: 'a + FnMut(&Unicorn, u32, usize, u32),
     {
         let mut hook: uc_hook = 0;
         let p_hook: *mut libc::size_t = &mut hook;
@@ -896,7 +906,7 @@ impl<'a> Unicorn<'a> {
         callback: F,
     ) -> Result<uc_hook>
     where
-        F: 'a + FnMut(&'a Unicorn<'a>),
+        F: 'a + FnMut(&Unicorn),
     {
         let mut hook: uc_hook = 0;
         let p_hook: *mut libc::size_t = &mut hook;

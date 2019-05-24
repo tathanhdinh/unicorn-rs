@@ -501,15 +501,14 @@ impl<'a> Unicorn<'a> {
     }
 
     unsafe fn reg_read_generic<T: Sized>(&self, regid: i32) -> Result<T> {
-        // deprecating in Rust 2.0.0: use mem::MaybeUninit::zeroed() instead
-        let mut value: T = mem::zeroed();
+        let mut value = mem::MaybeUninit::<T>::uninit();
         let err = uc_reg_read(
             self.handle,
             regid as libc::c_int,
             &mut value as *mut _ as *mut libc::c_void,
         );
         if err == Error::OK {
-            Ok(value)
+            Ok(value.assume_init())
         } else {
             Err(err)
         }

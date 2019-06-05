@@ -14,7 +14,7 @@ pub type uc_hook = libc::size_t;
 pub type uc_context = libc::size_t;
 
 extern "C" {
-    pub fn uc_version(major: *const u32, minor: *const u32) -> u32;
+    pub fn uc_version(major: *mut u32, minor: *mut u32) -> u32;
     pub fn uc_arch_supported(arch: Arch) -> bool;
     pub fn uc_open(arch: Arch, mode: Mode, engine: *mut uc_handle) -> Error;
     pub fn uc_close(engine: uc_handle) -> Error;

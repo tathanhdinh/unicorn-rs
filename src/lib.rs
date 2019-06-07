@@ -36,7 +36,7 @@ mod x86_const;
 #[macro_use]
 mod macros;
 
-use std::{cell::RefCell, collections::HashMap, marker::PhantomData, mem};
+use std::{cell::RefCell, collections::HashMap, marker::PhantomData, mem, ptr};
 
 pub use crate::{
     arm64_const::*,
@@ -416,6 +416,67 @@ pub struct Unicorn<'a> {
     insn_out_callbacks: RefCell<HashMap<uc_hook, Box<InsnOutHook<'a>>>>,
     insn_sys_callbacks: RefCell<HashMap<uc_hook, Box<InsnSysHook<'a>>>>,
     phantom: PhantomData<&'a libc::size_t>,
+}
+
+pub struct UnicornNext<'a> {
+    // handle: *mut libc::size_t,
+    // handle: NonNull<libc::size_t>,
+    handle: *mut libc::size_t,
+    phantom: PhantomData<&'a libc::size_t>,
+}
+
+impl<'a> UnicornNext<'a> {
+    pub fn new(arch: Arch, mode: Mode) -> Result<Self> {
+        let mut handle = ptr::null_mut();
+        let err = unsafe { uc_open(arch, mode, &mut handle as *mut _ as _) };
+        if err == Error::OK {
+            Ok(UnicornNext { handle, phantom: PhantomData })
+        } else {
+            Err(err)
+        }
+    }
+
+    /// Add a code hook.
+    pub fn add_code_hook<F>(
+        &self,
+        hook_type: CodeHookType,
+        begin: u64,
+        end: u64,
+        callback: F,
+    ) -> Result<uc_hook>
+    where
+        F: 'a + FnMut(u64, u32, &mut [u8]),
+    {
+        let mut hook: uc_hook = Default::default();
+        // let mut user_data = Box::new(CodeHook {
+        //     unicorn: self,
+        //     callback: Box::new(callback),
+        // });
+
+        let err = unsafe {
+            uc_hook_add(
+                self.handle as _,
+                &mut hook,
+                mem::transmute(hook_type),
+                code_hook_proxy as _,
+                user_data.as_mut() as *mut _ as _,
+                begin,
+                end,
+            )
+        };
+        if err == Error::OK {
+            self.code_callbacks.borrow_mut().insert(hook, user_data);
+            Ok(hook)
+        } else {
+            Err(err)
+        }
+    }
+}
+
+impl Drop for UnicornNext<'_> {
+    fn drop(&mut self) {
+        unsafe { uc_close(self.handle as _) };
+    }
 }
 
 /// Returns a tuple `(major, minor)` for the bindings version number.
@@ -974,7 +1035,7 @@ impl<'a> Unicorn<'a> {
     }
 }
 
-impl<'a> Drop for Unicorn<'a> {
+impl Drop for Unicorn<'_> {
     fn drop(&mut self) {
         unsafe { uc_close(self.handle) };
     }
